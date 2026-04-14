@@ -30,10 +30,6 @@ def _score_color(score):
     return "#c62828"      # red
 
 
-def _severity_color(severity):
-    return {"HIGH": "#c62828", "MEDIUM": "#e65100", "LOW": "#f9a825"}.get(severity, "#666")
-
-
 def _verdict_color(verdict):
     if "Full Approval" in verdict:
         return "#2e7d32"
@@ -97,8 +93,7 @@ def display_domain_summary(domain_results):
     s = df.style
     s = _style_map(s, lambda v: f"color: {_score_color(v)}" if isinstance(v, (int, float)) else "", subset=["Score"])
     s = _style_map(s, lambda v: "color: #c62828; font-weight: bold" if v == "FAIL" else "", subset=["Below 40"])
-    styled_html = s.hide(axis="index").to_html()
-    display(HTML(styled_html))
+    display(HTML(s.hide(axis="index").to_html()))
 
 
 def display_domain_detail(domain_results):
@@ -120,47 +115,7 @@ def display_domain_detail(domain_results):
             })
         s = pd.DataFrame(rows).style
         s = _style_map(s, lambda v: f"color: {_score_color(v)}" if isinstance(v, (int, float)) and v <= 100 else "", subset=["Score"])
-        styled_html = s.hide(axis="index").to_html()
-        display(HTML(styled_html))
-
-
-def display_design_patterns(design_results):
-    display(HTML("<h3>Modern Design Pattern Requirements</h3>"))
-    for pillar, data in design_results.items():
-        color = _score_color(data["score"])
-        display(HTML(f"""
-        <div style="border-left:4px solid {color};padding:8px 16px;margin:12px 0">
-            <h4 style="margin:0">{pillar} — {data['matched_count']}/{data['total_count']} ({data['score']}%)</h4>
-        </div>
-        """))
-        rows = []
-        for item in data["items"]:
-            rows.append({
-                "Requirement": item["requirement"][:80],
-                "Found": "Yes" if item["found"] else "No",
-                "Evidence": item.get("evidence", "")[:100] or "—",
-            })
-        s = pd.DataFrame(rows).style
-        s = _style_map(s, lambda v: "color: #2e7d32" if v == "Yes" else ("color: #c62828" if v == "No" else ""), subset=["Found"])
-        styled_html = s.hide(axis="index").to_html()
-        display(HTML(styled_html))
-
-
-def display_risk_register(risk_results, addressed_count, total_count):
-    display(HTML(f"<h3>Risk Register Coverage — {addressed_count}/{total_count} Addressed</h3>"))
-    rows = []
-    for r in risk_results:
-        rows.append({
-            "Risk": r["risk"],
-            "Severity": r["severity"],
-            "Addressed": "Yes" if r["addressed"] else "No",
-            "Evidence": r.get("evidence", "")[:100] or "—",
-        })
-    s = pd.DataFrame(rows).style
-    s = _style_map(s, lambda v: f"color: {_severity_color(v)}" if v in ("HIGH", "MEDIUM", "LOW") else "", subset=["Severity"])
-    s = _style_map(s, lambda v: "color: #2e7d32" if v == "Yes" else ("color: #c62828" if v == "No" else ""), subset=["Addressed"])
-    styled_html = s.hide(axis="index").to_html()
-    display(HTML(styled_html))
+        display(HTML(s.hide(axis="index").to_html()))
 
 
 def display_full_report(filename, results):
@@ -170,14 +125,6 @@ def display_full_report(filename, results):
     display_domain_summary(results["domains"])
     display(HTML("<hr><h3>Detailed Domain Evaluation</h3>"))
     display_domain_detail(results["domains"])
-    display(HTML("<hr>"))
-    display_design_patterns(results["design_patterns"])
-    display(HTML("<hr>"))
-    display_risk_register(
-        results["risk_register"],
-        results["risks_addressed"],
-        results["risks_total"],
-    )
 
 
 def results_to_dataframe(results):
@@ -247,8 +194,6 @@ def display_comparison(all_results):
             row[domain] = ddata["score"]
         row["Composite"] = r["composite"]["composite_score"]
         row["Verdict"] = r["composite"]["verdict"]
-        row["Design Patterns"] = r["design_patterns_overall_score"]
-        row["Risks Addressed"] = f"{r['risks_addressed']}/{r['risks_total']}"
         rows.append(row)
 
     display(HTML("<h3>Multi-Document Comparison</h3>"))

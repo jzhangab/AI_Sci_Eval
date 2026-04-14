@@ -3,7 +3,6 @@ Core evaluation engine.
 Uses the Dataiku LLM Mesh to evaluate documents against the framework criteria.
 """
 import json
-import math
 from collections import OrderedDict
 from lib.document_parser import parse_file
 from lib.llm_client import call_llm
@@ -15,8 +14,6 @@ from lib.framework_config import (
     FULL_APPROVAL_THRESHOLD,
     CONDITIONAL_APPROVAL_THRESHOLD,
     SCORE_RUBRIC,
-    DESIGN_PATTERNS,
-    RISK_REGISTER,
 )
 
 
@@ -89,7 +86,6 @@ def _parse_llm_json(response_text):
     text = response_text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
-        # Remove first and last fence lines
         start = 1
         end = len(lines)
         for i in range(len(lines) - 1, 0, -1):
@@ -120,7 +116,6 @@ def evaluate_domain_criteria(text):
         raw_response = call_llm(prompt)
         parsed = _parse_llm_json(raw_response)
 
-        # Build results keyed by criterion key for lookup
         llm_scores = {c["key"]: c for c in parsed["criteria"]}
 
         criteria_results = []
@@ -153,154 +148,6 @@ def evaluate_domain_criteria(text):
             "below_threshold": domain_score < CRITICAL_THRESHOLD,
             "criteria": criteria_results,
         }
-
-    return results
-
-
-# ---------------------------------------------------------------------------
-# LLM-based design pattern evaluation
-# ---------------------------------------------------------------------------
-
-_DESIGN_PATTERN_PROMPT = """\
-You are evaluating a document against the **Modern Design Pattern Requirements** of the AI/LLM Scientific Review Framework.
-
-## Design Pattern Pillars and Requirements:
-{pillars_block}
-
-## Document text (may be truncated):
----
-{document_text}
----
-
-## Instructions:
-For EACH requirement across ALL pillars, determine whether the document addresses it.
-Return ONLY valid JSON in this exact format (no markdown, no commentary):
-{{
-  "pillars": [
-    {{
-      "pillar": "<pillar name>",
-      "items": [
-        {{
-          "requirement": "<requirement text>",
-          "found": <true or false>,
-          "evidence": "<brief quote or summary if found, or 'Not addressed' if not>"
-        }}
-      ]
-    }}
-  ]
-}}
-"""
-
-
-def _build_pillars_block():
-    lines = []
-    for pillar, items in DESIGN_PATTERNS.items():
-        lines.append(f"\n### {pillar}")
-        for item in items:
-            lines.append(f"- {item}")
-    return "\n".join(lines)
-
-
-def evaluate_design_patterns(text):
-    """
-    Evaluate document text against Section 3 design pattern checklists using the LLM.
-    """
-    truncated = _truncate_text(text)
-    prompt = _DESIGN_PATTERN_PROMPT.format(
-        pillars_block=_build_pillars_block(),
-        document_text=truncated,
-    )
-
-    raw_response = call_llm(prompt)
-    parsed = _parse_llm_json(raw_response)
-
-    results = OrderedDict()
-    for pillar_data in parsed["pillars"]:
-        pillar_name = pillar_data["pillar"]
-        matched = []
-        for item in pillar_data["items"]:
-            matched.append({
-                "requirement": item["requirement"],
-                "found": bool(item.get("found", False)),
-                "evidence": item.get("evidence", ""),
-            })
-
-        found_count = sum(1 for m in matched if m["found"])
-        total = len(matched)
-        results[pillar_name] = {
-            "items": matched,
-            "matched_count": found_count,
-            "total_count": total,
-            "score": round((found_count / total) * 100) if total > 0 else 0,
-        }
-
-    return results
-
-
-# ---------------------------------------------------------------------------
-# LLM-based risk register evaluation
-# ---------------------------------------------------------------------------
-
-_RISK_REGISTER_PROMPT = """\
-You are evaluating a document against the **Risk Register** of the AI/LLM Scientific Review Framework.
-
-## Risk Register:
-{risks_block}
-
-## Document text (may be truncated):
----
-{document_text}
----
-
-## Instructions:
-For EACH risk, determine whether the document addresses or mitigates it.
-Return ONLY valid JSON in this exact format (no markdown, no commentary):
-{{
-  "risks": [
-    {{
-      "risk": "<risk name>",
-      "severity": "<HIGH/MEDIUM/LOW>",
-      "addressed": <true or false>,
-      "evidence": "<brief quote or summary if addressed, or 'Not addressed' if not>"
-    }}
-  ]
-}}
-"""
-
-
-def _build_risks_block():
-    lines = []
-    for r in RISK_REGISTER:
-        lines.append(f"- **{r['risk']}** (Severity: {r['severity']}): {r['description']} Mitigation: {r['mitigation']}")
-    return "\n".join(lines)
-
-
-def evaluate_risk_register(text):
-    """
-    Check which risk register items are addressed using the LLM.
-    """
-    truncated = _truncate_text(text)
-    prompt = _RISK_REGISTER_PROMPT.format(
-        risks_block=_build_risks_block(),
-        document_text=truncated,
-    )
-
-    raw_response = call_llm(prompt)
-    parsed = _parse_llm_json(raw_response)
-
-    results = []
-    risk_lookup = {r["risk"]: r for r in RISK_REGISTER}
-    for item in parsed["risks"]:
-        risk_name = item["risk"]
-        ref = risk_lookup.get(risk_name, {})
-        results.append({
-            "risk": risk_name,
-            "severity": item.get("severity", ref.get("severity", "MEDIUM")),
-            "description": ref.get("description", ""),
-            "mitigation": ref.get("mitigation", ""),
-            "addressed": bool(item.get("addressed", False)),
-            "evidence": item.get("evidence", ""),
-        })
 
     return results
 
@@ -358,25 +205,15 @@ def _interpret_score(score):
 
 def run_full_evaluation(text):
     """
-    Run the complete LLM-powered evaluation pipeline on document text.
-    Returns a comprehensive results dict.
+    Run the LLM-powered evaluation pipeline on document text.
+    Evaluates the 5 framework domains and computes the composite verdict.
     """
     domain_results = evaluate_domain_criteria(text)
     composite = compute_composite_score(domain_results)
-    design_results = evaluate_design_patterns(text)
-    risk_results = evaluate_risk_register(text)
-
-    dp_scores = [v["score"] for v in design_results.values()]
-    dp_overall = round(sum(dp_scores) / len(dp_scores)) if dp_scores else 0
 
     return {
         "domains": domain_results,
         "composite": composite,
-        "design_patterns": design_results,
-        "design_patterns_overall_score": dp_overall,
-        "risk_register": risk_results,
-        "risks_addressed": sum(1 for r in risk_results if r["addressed"]),
-        "risks_total": len(risk_results),
     }
 
 
@@ -402,7 +239,7 @@ def evaluate_documents(documents):
         try:
             text = parse_file(filename, file_bytes)
             print(f"{len(text.split()):,} words extracted.")
-            print(f"Evaluating with LLM (5 domains + design patterns + risk register)...")
+            print(f"Evaluating with LLM (5 domains: Accuracy, Safety, Transparency, Repeatability, Trustworthiness)...")
             results = run_full_evaluation(text)
             all_results[filename] = {"text": text, "results": results}
             print(f"  -> Composite: {results['composite']['composite_score']} — {results['composite']['verdict']}")
