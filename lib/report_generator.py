@@ -115,9 +115,8 @@ def display_domain_detail(domain_results):
                 "Criterion": c["name"],
                 "Rigor": c["rigor"],
                 "Score": c["score"],
-                "Keywords Found": len(c["keywords_found"]),
-                "Keywords Total": c["keywords_total"],
-                "Matches": ", ".join(c["keywords_found"][:5]) or "None",
+                "Evidence": c.get("evidence", "")[:120] or "—",
+                "Gap": c.get("gap", "")[:120] or "None",
             })
         s = pd.DataFrame(rows).style
         s = _style_map(s, lambda v: f"color: {_score_color(v)}" if isinstance(v, (int, float)) and v <= 100 else "", subset=["Score"])
@@ -139,7 +138,7 @@ def display_design_patterns(design_results):
             rows.append({
                 "Requirement": item["requirement"][:80],
                 "Found": "Yes" if item["found"] else "No",
-                "Matched Keywords": ", ".join(item["keywords_matched"][:3]) or "—",
+                "Evidence": item.get("evidence", "")[:100] or "—",
             })
         s = pd.DataFrame(rows).style
         s = _style_map(s, lambda v: "color: #2e7d32" if v == "Yes" else ("color: #c62828" if v == "No" else ""), subset=["Found"])
@@ -155,7 +154,7 @@ def display_risk_register(risk_results, addressed_count, total_count):
             "Risk": r["risk"],
             "Severity": r["severity"],
             "Addressed": "Yes" if r["addressed"] else "No",
-            "Keywords Found": ", ".join(r["keywords_found"][:3]) or "—",
+            "Evidence": r.get("evidence", "")[:100] or "—",
         })
     s = pd.DataFrame(rows).style
     s = _style_map(s, lambda v: f"color: {_severity_color(v)}" if v in ("HIGH", "MEDIUM", "LOW") else "", subset=["Severity"])
@@ -193,9 +192,8 @@ def results_to_dataframe(results):
                 "criterion": c["name"],
                 "criterion_rigor": c["rigor"],
                 "criterion_score": c["score"],
-                "keywords_found": len(c["keywords_found"]),
-                "keywords_total": c["keywords_total"],
-                "keyword_matches": "; ".join(c["keywords_found"]),
+                "evidence": c.get("evidence", ""),
+                "gap": c.get("gap", ""),
             })
     df = pd.DataFrame(rows)
     df["composite_score"] = results["composite"]["composite_score"]
