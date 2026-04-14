@@ -7,6 +7,13 @@ import pandas as pd
 from IPython.display import HTML, display
 
 
+def _style_map(styler, func, **kwargs):
+    """Compatibility wrapper: uses Styler.map (pandas >=2.1) or applymap (older)."""
+    if hasattr(styler, "map"):
+        return styler.map(func, **kwargs)
+    return styler.applymap(func, **kwargs)
+
+
 # ---------------------------------------------------------------------------
 # Color helpers
 # ---------------------------------------------------------------------------
@@ -87,13 +94,11 @@ def display_domain_summary(domain_results):
         })
     df = pd.DataFrame(rows)
     display(HTML("<h3>Domain Scores</h3>"))
-    display(df.style.applymap(
-        lambda v: f"color: {_score_color(v)}" if isinstance(v, (int, float)) else "",
-        subset=["Score"]
-    ).applymap(
-        lambda v: "color: #c62828; font-weight: bold" if v == "FAIL" else "",
-        subset=["Below 40"]
-    ).hide(axis="index").to_html())
+    s = df.style
+    s = _style_map(s, lambda v: f"color: {_score_color(v)}" if isinstance(v, (int, float)) else "", subset=["Score"])
+    s = _style_map(s, lambda v: "color: #c62828; font-weight: bold" if v == "FAIL" else "", subset=["Below 40"])
+    styled_html = s.hide(axis="index").to_html()
+    display(HTML(styled_html))
 
 
 def display_domain_detail(domain_results):
@@ -114,10 +119,10 @@ def display_domain_detail(domain_results):
                 "Keywords Total": c["keywords_total"],
                 "Matches": ", ".join(c["keywords_found"][:5]) or "None",
             })
-        display(pd.DataFrame(rows).style.applymap(
-            lambda v: f"color: {_score_color(v)}" if isinstance(v, (int, float)) and v <= 100 else "",
-            subset=["Score"]
-        ).hide(axis="index").to_html())
+        s = pd.DataFrame(rows).style
+        s = _style_map(s, lambda v: f"color: {_score_color(v)}" if isinstance(v, (int, float)) and v <= 100 else "", subset=["Score"])
+        styled_html = s.hide(axis="index").to_html()
+        display(HTML(styled_html))
 
 
 def display_design_patterns(design_results):
@@ -136,10 +141,10 @@ def display_design_patterns(design_results):
                 "Found": "Yes" if item["found"] else "No",
                 "Matched Keywords": ", ".join(item["keywords_matched"][:3]) or "—",
             })
-        display(pd.DataFrame(rows).style.applymap(
-            lambda v: "color: #2e7d32" if v == "Yes" else ("color: #c62828" if v == "No" else ""),
-            subset=["Found"]
-        ).hide(axis="index").to_html())
+        s = pd.DataFrame(rows).style
+        s = _style_map(s, lambda v: "color: #2e7d32" if v == "Yes" else ("color: #c62828" if v == "No" else ""), subset=["Found"])
+        styled_html = s.hide(axis="index").to_html()
+        display(HTML(styled_html))
 
 
 def display_risk_register(risk_results, addressed_count, total_count):
@@ -152,13 +157,11 @@ def display_risk_register(risk_results, addressed_count, total_count):
             "Addressed": "Yes" if r["addressed"] else "No",
             "Keywords Found": ", ".join(r["keywords_found"][:3]) or "—",
         })
-    display(pd.DataFrame(rows).style.applymap(
-        lambda v: f"color: {_severity_color(v)}" if v in ("HIGH", "MEDIUM", "LOW") else "",
-        subset=["Severity"]
-    ).applymap(
-        lambda v: "color: #2e7d32" if v == "Yes" else ("color: #c62828" if v == "No" else ""),
-        subset=["Addressed"]
-    ).hide(axis="index").to_html())
+    s = pd.DataFrame(rows).style
+    s = _style_map(s, lambda v: f"color: {_severity_color(v)}" if v in ("HIGH", "MEDIUM", "LOW") else "", subset=["Severity"])
+    s = _style_map(s, lambda v: "color: #2e7d32" if v == "Yes" else ("color: #c62828" if v == "No" else ""), subset=["Addressed"])
+    styled_html = s.hide(axis="index").to_html()
+    display(HTML(styled_html))
 
 
 def display_full_report(filename, results):
