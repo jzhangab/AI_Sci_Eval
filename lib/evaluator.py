@@ -2,8 +2,9 @@
 Core evaluation engine.
 Scans document text against the framework criteria and produces scores.
 """
-import re
+import math
 from collections import OrderedDict
+from lib.document_parser import parse_file
 from lib.framework_config import (
     DOMAIN_CRITERIA,
     DOMAIN_WEIGHTS,
@@ -41,7 +42,6 @@ def _score_criterion(text_lower, keywords, rigor):
 
     # Scaled coverage: use sqrt curve so partial matches score higher
     # sqrt(0.3)=0.55, sqrt(0.5)=0.71, sqrt(0.7)=0.84, sqrt(1.0)=1.0
-    import math
     scaled_coverage = math.sqrt(coverage)
 
     # Depth: total occurrences of matched keywords (diminishing returns)
@@ -219,3 +219,37 @@ def run_full_evaluation(text):
         "risks_addressed": sum(1 for r in risk_results if r["addressed"]),
         "risks_total": len(risk_results),
     }
+
+
+def evaluate_documents(documents):
+    """
+    Parse and evaluate all documents in a {filename: bytes} dict.
+    Returns {filename: {"text": str, "results": dict}} for successfully evaluated docs.
+    Prints progress and errors inline.
+    """
+    from IPython.display import display, HTML
+
+    if not documents:
+        display(HTML(
+            '<div style="background:#fff3e0;border:1px solid #e65100;border-radius:6px;'
+            'padding:16px;color:#e65100"><strong>No documents loaded.</strong> '
+            'Add files to the eval_documents folder or use the upload widget, '
+            'then re-run this cell.</div>'
+        ))
+        return {}
+
+    all_results = {}
+    for filename, file_bytes in documents.items():
+        print(f"Parsing: {filename} ...", end=" ")
+        try:
+            text = parse_file(filename, file_bytes)
+            print(f"{len(text.split()):,} words extracted.")
+            all_results[filename] = {
+                "text": text,
+                "results": run_full_evaluation(text),
+            }
+        except Exception as exc:
+            print(f"ERROR: {exc}")
+
+    print(f"\nEvaluated {len(all_results)} document(s) successfully.")
+    return all_results

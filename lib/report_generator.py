@@ -182,7 +182,7 @@ def display_full_report(filename, results):
 
 
 def results_to_dataframe(results):
-    """Convert results to a flat DataFrame suitable for Dataiku dataset export."""
+    """Convert a single document's results to a flat DataFrame."""
     rows = []
     for domain, data in results["domains"].items():
         for c in data["criteria"]:
@@ -201,3 +201,57 @@ def results_to_dataframe(results):
     df["composite_score"] = results["composite"]["composite_score"]
     df["verdict"] = results["composite"]["verdict"]
     return df
+
+
+# ---------------------------------------------------------------------------
+# Batch / orchestration functions (called directly from notebook cells)
+# ---------------------------------------------------------------------------
+
+def display_all_reports(all_results):
+    """Render evaluation reports for every document in all_results."""
+    for filename, data in all_results.items():
+        display_full_report(filename, data["results"])
+        display(HTML("<br><hr style='border:2px solid #ccc'><br>"))
+
+
+def export_results(all_results):
+    """
+    Combine all document results into a single exportable DataFrame.
+    Displays the table and returns the DataFrame.
+    """
+    frames = []
+    for filename, data in all_results.items():
+        df = results_to_dataframe(data["results"])
+        df.insert(0, "document", filename)
+        frames.append(df)
+
+    if not frames:
+        print("No results to export.")
+        return pd.DataFrame()
+
+    results_df = pd.concat(frames, ignore_index=True)
+    display(HTML("<h3>Results DataFrame (exportable)</h3>"))
+    display(results_df)
+    return results_df
+
+
+def display_comparison(all_results):
+    """Show a side-by-side comparison table when multiple documents were evaluated."""
+    if len(all_results) <= 1:
+        print("Upload multiple documents to see a comparison table.")
+        return
+
+    rows = []
+    for filename, data in all_results.items():
+        r = data["results"]
+        row = {"Document": filename}
+        for domain, ddata in r["domains"].items():
+            row[domain] = ddata["score"]
+        row["Composite"] = r["composite"]["composite_score"]
+        row["Verdict"] = r["composite"]["verdict"]
+        row["Design Patterns"] = r["design_patterns_overall_score"]
+        row["Risks Addressed"] = f"{r['risks_addressed']}/{r['risks_total']}"
+        rows.append(row)
+
+    display(HTML("<h3>Multi-Document Comparison</h3>"))
+    display(HTML(pd.DataFrame(rows).style.hide(axis="index").to_html()))
