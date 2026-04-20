@@ -163,10 +163,20 @@ def display_full_report(filename, results):
 _DATAIKU_FOLDER = "evaluation_results"
 
 
+def _cell_header(cell, text):
+    """Set cell text and bold the run, creating a run if needed."""
+    cell.text = str(text)
+    para = cell.paragraphs[0]
+    if para.runs:
+        para.runs[0].bold = True
+    else:
+        para.add_run(str(text)).bold = True
+
+
 def _generate_docx(filename, results, report_type="scientific"):
     """Build a python-docx Document from evaluation results and return bytes."""
     from docx import Document
-    from docx.shared import Pt, RGBColor, Inches
+    from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     doc = Document()
@@ -178,18 +188,20 @@ def _generate_docx(filename, results, report_type="scientific"):
 
     sub = doc.add_paragraph(f"Evaluation Report — {filename}")
     sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    sub.runs[0].italic = True
+    if sub.runs:
+        sub.runs[0].italic = True
 
     ts = doc.add_paragraph(f"Generated {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
     ts.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    ts.runs[0].font.size = Pt(9)
-    ts.runs[0].font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+    if ts.runs:
+        ts.runs[0].font.size = Pt(9)
+        ts.runs[0].font.color.rgb = RGBColor(0x99, 0x99, 0x99)
 
     doc.add_paragraph()
 
     # ── Verdict block ─────────────────────────────────────────────────────────
     composite = results["composite"]
-    verdict = composite["verdict"]
+    verdict = str(composite["verdict"])
     score = composite["composite_score"]
     interp = composite["interpretation"]
     crit = " | CRITICAL DOMAIN FAILURE" if composite["critical_failure"] else ""
@@ -209,16 +221,14 @@ def _generate_docx(filename, results, report_type="scientific"):
     tbl = doc.add_table(rows=1, cols=len(summary_cols))
     tbl.style = "Table Grid"
     for i, col in enumerate(summary_cols):
-        cell = tbl.rows[0].cells[i]
-        cell.text = col
-        cell.paragraphs[0].runs[0].bold = True
+        _cell_header(tbl.rows[0].cells[i], col)
 
     for domain, data in results["domains"].items():
         row = tbl.add_row().cells
-        row[0].text = domain
+        row[0].text = str(domain)
         row[1].text = f"{int(data['weight'] * 100)}%"
         row[2].text = str(data["score"])
-        row[3].text = data["interpretation"]["label"]
+        row[3].text = str(data["interpretation"]["label"])
         row[4].text = "Yes" if data["is_critical"] else ""
         row[5].text = "FAIL" if data["below_threshold"] else "Pass"
 
@@ -236,17 +246,15 @@ def _generate_docx(filename, results, report_type="scientific"):
         ctbl = doc.add_table(rows=1, cols=len(crit_cols))
         ctbl.style = "Table Grid"
         for i, col in enumerate(crit_cols):
-            cell = ctbl.rows[0].cells[i]
-            cell.text = col
-            cell.paragraphs[0].runs[0].bold = True
+            _cell_header(ctbl.rows[0].cells[i], col)
 
         for c in data["criteria"]:
             crow = ctbl.add_row().cells
-            crow[0].text = c["name"]
-            crow[1].text = c["rigor"]
-            crow[2].text = str(c["score"])
-            crow[3].text = c.get("evidence", "") or "—"
-            crow[4].text = c.get(issues_key, "") or "None"
+            crow[0].text = str(c.get("name", ""))
+            crow[1].text = str(c.get("rigor", ""))
+            crow[2].text = str(c.get("score", ""))
+            crow[3].text = str(c.get("evidence", "") or "—")
+            crow[4].text = str(c.get(issues_key, "") or "None")
 
         doc.add_paragraph()
 
