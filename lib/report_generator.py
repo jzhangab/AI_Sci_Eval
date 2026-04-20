@@ -157,56 +157,122 @@ def display_full_report(filename, results):
 
 
 # ---------------------------------------------------------------------------
-# PDF generation and Dataiku folder export
+# Word document generation and Dataiku folder export
 # ---------------------------------------------------------------------------
-
-_PDF_CSS = """
-body { font-family: Arial, sans-serif; font-size: 13px; color: #222; margin: 24px; }
-table { border-collapse: collapse; width: 100%; margin-bottom: 12px; }
-th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; }
-th { background: #f5f5f5; }
-h1, h2, h3, h4 { margin: 8px 0; }
-"""
 
 _DATAIKU_FOLDER = "evaluation_results"
 
 
-def _generate_pdf(html_body):
-    """Convert an HTML body string to PDF bytes using xhtml2pdf."""
-    from xhtml2pdf import pisa
-    full_html = (
-        f"<!DOCTYPE html><html><head><meta charset='utf-8'>"
-        f"<style>{_PDF_CSS}</style></head>"
-        f"<body>{html_body}</body></html>"
-    )
+def _generate_docx(filename, results, report_type="scientific"):
+    """Build a python-docx Document from evaluation results and return bytes."""
+    from docx import Document
+    from docx.shared import Pt, RGBColor, Inches
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    doc = Document()
+
+    # ── Title block ──────────────────────────────────────────────────────────
+    title_label = "AI Artifact Evaluation" if report_type == "artifact" else "AI / LLM Scientific Review Framework"
+    h = doc.add_heading(title_label, level=1)
+    h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    sub = doc.add_paragraph(f"Evaluation Report — {filename}")
+    sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    sub.runs[0].italic = True
+
+    ts = doc.add_paragraph(f"Generated {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    ts.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    ts.runs[0].font.size = Pt(9)
+    ts.runs[0].font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+
+    doc.add_paragraph()
+
+    # ── Verdict block ─────────────────────────────────────────────────────────
+    composite = results["composite"]
+    verdict = composite["verdict"]
+    score = composite["composite_score"]
+    interp = composite["interpretation"]
+    crit = " | CRITICAL DOMAIN FAILURE" if composite["critical_failure"] else ""
+
+    doc.add_heading("Overall Verdict", level=2)
+    vp = doc.add_paragraph()
+    run = vp.add_run(f"{verdict}  —  {score} / 100")
+    run.bold = True
+    run.font.size = Pt(14)
+
+    doc.add_paragraph(f"{interp['label']} — {interp['action']}{crit}")
+    doc.add_paragraph()
+
+    # ── Domain summary table ──────────────────────────────────────────────────
+    doc.add_heading("Domain Scores", level=2)
+    summary_cols = ["Domain", "Weight", "Score", "Interpretation", "Critical", "Below 40"]
+    tbl = doc.add_table(rows=1, cols=len(summary_cols))
+    tbl.style = "Table Grid"
+    for i, col in enumerate(summary_cols):
+        cell = tbl.rows[0].cells[i]
+        cell.text = col
+        cell.paragraphs[0].runs[0].bold = True
+
+    for domain, data in results["domains"].items():
+        row = tbl.add_row().cells
+        row[0].text = domain
+        row[1].text = f"{int(data['weight'] * 100)}%"
+        row[2].text = str(data["score"])
+        row[3].text = data["interpretation"]["label"]
+        row[4].text = "Yes" if data["is_critical"] else ""
+        row[5].text = "FAIL" if data["below_threshold"] else "Pass"
+
+    doc.add_paragraph()
+
+    # ── Detailed domain criteria ──────────────────────────────────────────────
+    issues_key = "issues" if report_type == "artifact" else "gap"
+    issues_label = "Issues" if report_type == "artifact" else "Gap"
+
+    doc.add_heading("Detailed Evaluation", level=2)
+    for domain, data in results["domains"].items():
+        doc.add_heading(f"{domain}  (score: {data['score']})", level=3)
+
+        crit_cols = ["Criterion", "Rigor", "Score", "Evidence", issues_label]
+        ctbl = doc.add_table(rows=1, cols=len(crit_cols))
+        ctbl.style = "Table Grid"
+        for i, col in enumerate(crit_cols):
+            cell = ctbl.rows[0].cells[i]
+            cell.text = col
+            cell.paragraphs[0].runs[0].bold = True
+
+        for c in data["criteria"]:
+            crow = ctbl.add_row().cells
+            crow[0].text = c["name"]
+            crow[1].text = c["rigor"]
+            crow[2].text = str(c["score"])
+            crow[3].text = c.get("evidence", "") or "—"
+            crow[4].text = c.get(issues_key, "") or "None"
+
+        doc.add_paragraph()
+
     buf = io.BytesIO()
-    pisa.CreatePDF(full_html, dest=buf, encoding="utf-8")
+    doc.save(buf)
     return buf.getvalue()
 
 
-def _save_pdf_to_folder(filename, results, report_type="scientific"):
-    """Generate a PDF from results and save it to the Dataiku evaluation_results folder."""
+def _save_docx_to_folder(filename, results, report_type="scientific"):
+    """Generate a Word document from results and save it to the Dataiku evaluation_results folder."""
     import dataiku
     try:
-        if report_type == "artifact":
-            html_body = _full_artifact_report_html(filename, results)
-        else:
-            html_body = _full_report_html(filename, results)
-
-        pdf_bytes = _generate_pdf(html_body)
+        docx_bytes = _generate_docx(filename, results, report_type)
         stem = filename.rsplit(".", 1)[0] if "." in filename else filename
-        pdf_name = f"{stem}_eval_report.pdf"
+        docx_name = f"{stem}_eval_report.docx"
 
         folder = dataiku.Folder(_DATAIKU_FOLDER)
-        folder.upload_data(pdf_name, pdf_bytes)
+        folder.upload_data(docx_name, docx_bytes)
 
         display(HTML(
-            f'<p style="color:#2e7d32;margin:4px 0">&#10003; PDF saved to '
-            f'<strong>{_DATAIKU_FOLDER}/{pdf_name}</strong></p>'
+            f'<p style="color:#2e7d32;margin:4px 0">&#10003; Word document saved to '
+            f'<strong>{_DATAIKU_FOLDER}/{docx_name}</strong></p>'
         ))
     except Exception as e:
         display(HTML(
-            f'<p style="color:#c62828">&#10007; PDF export failed for <strong>{filename}</strong>: {e}</p>'
+            f'<p style="color:#c62828">&#10007; Word export failed for <strong>{filename}</strong>: {e}</p>'
         ))
 
 
@@ -243,7 +309,7 @@ def display_all_reports(all_results):
     """Render evaluation reports for every document in all_results."""
     for filename, data in all_results.items():
         display_full_report(filename, data["results"])
-        _save_pdf_to_folder(filename, data["results"], report_type="scientific")
+        _save_docx_to_folder(filename, data["results"], report_type="scientific")
         display(HTML("<br><hr style='border:2px solid #ccc'><br>"))
 
 
@@ -369,7 +435,7 @@ def display_all_artifact_reports(all_results):
     """Render artifact evaluation reports for every artifact."""
     for filename, data in all_results.items():
         display_artifact_report(filename, data["results"])
-        _save_pdf_to_folder(filename, data["results"], report_type="artifact")
+        _save_docx_to_folder(filename, data["results"], report_type="artifact")
         display(HTML("<br><hr style='border:2px solid #ccc'><br>"))
 
 
