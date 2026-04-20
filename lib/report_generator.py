@@ -2,6 +2,7 @@
 Report generation utilities.
 Produces styled HTML and DataFrame outputs for Dataiku notebook display.
 """
+import base64
 import datetime
 import pandas as pd
 from IPython.display import HTML, display
@@ -49,35 +50,35 @@ def _bar_html(score, width=200):
 
 
 # ---------------------------------------------------------------------------
-# Display functions
+# HTML builders (return strings — used for both display and PDF export)
 # ---------------------------------------------------------------------------
 
-def display_header(filename):
-    display(HTML(f"""
+def _header_html(filename):
+    return f"""
     <div style="background:linear-gradient(135deg,#1a237e,#283593);color:white;padding:24px 32px;border-radius:8px;margin-bottom:16px">
         <h1 style="margin:0;font-size:24px">AI / LLM Scientific Review Framework</h1>
         <p style="margin:4px 0 0;opacity:0.85">Evaluation Report &mdash; {filename}</p>
         <p style="margin:2px 0 0;opacity:0.65;font-size:12px">Generated {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
     </div>
-    """))
+    """
 
 
-def display_verdict(composite):
+def _verdict_html(composite):
     verdict = composite["verdict"]
     score = composite["composite_score"]
     color = _verdict_color(verdict)
     interp = composite["interpretation"]
     crit = " | CRITICAL DOMAIN FAILURE" if composite["critical_failure"] else ""
-    display(HTML(f"""
+    return f"""
     <div style="border:3px solid {color};border-radius:8px;padding:20px;margin-bottom:16px;text-align:center">
         <h2 style="margin:0;color:{color}">{verdict}</h2>
         <p style="font-size:36px;margin:8px 0;font-weight:bold;color:{color}">{score} / 100</p>
         <p style="margin:0;color:#555">{interp['label']} &mdash; {interp['action']}{crit}</p>
     </div>
-    """))
+    """
 
 
-def display_domain_summary(domain_results):
+def _domain_summary_html(domain_results):
     rows = []
     for domain, data in domain_results.items():
         rows.append({
@@ -89,21 +90,21 @@ def display_domain_summary(domain_results):
             "Below 40": "FAIL" if data["below_threshold"] else "Pass",
         })
     df = pd.DataFrame(rows)
-    display(HTML("<h3>Domain Scores</h3>"))
     s = df.style
     s = _style_map(s, lambda v: f"color: {_score_color(v)}" if isinstance(v, (int, float)) else "", subset=["Score"])
     s = _style_map(s, lambda v: "color: #c62828; font-weight: bold" if v == "FAIL" else "", subset=["Below 40"])
-    display(HTML(s.hide(axis="index").to_html()))
+    return "<h3>Domain Scores</h3>" + s.hide(axis="index").to_html()
 
 
-def display_domain_detail(domain_results):
+def _domain_detail_html(domain_results):
+    parts = []
     for domain, data in domain_results.items():
         color = _score_color(data["score"])
-        display(HTML(f"""
+        parts.append(f"""
         <div style="border-left:4px solid {color};padding:8px 16px;margin:12px 0">
             <h4 style="margin:0">{domain} — {_bar_html(data['score'], 180)}</h4>
         </div>
-        """))
+        """)
         rows = []
         for c in data["criteria"]:
             rows.append({
@@ -115,17 +116,99 @@ def display_domain_detail(domain_results):
             })
         s = pd.DataFrame(rows).style
         s = _style_map(s, lambda v: f"color: {_score_color(v)}" if isinstance(v, (int, float)) and v <= 100 else "", subset=["Score"])
-        display(HTML(s.hide(axis="index").to_html()))
+        parts.append(s.hide(axis="index").to_html())
+    return "".join(parts)
+
+
+def _full_report_html(filename, results):
+    """Build complete HTML string for one scientific evaluation report."""
+    return "".join([
+        _header_html(filename),
+        _verdict_html(results["composite"]),
+        _domain_summary_html(results["domains"]),
+        "<hr><h3>Detailed Domain Evaluation</h3>",
+        _domain_detail_html(results["domains"]),
+    ])
+
+
+# ---------------------------------------------------------------------------
+# Display functions (delegate to HTML builders)
+# ---------------------------------------------------------------------------
+
+def display_header(filename):
+    display(HTML(_header_html(filename)))
+
+
+def display_verdict(composite):
+    display(HTML(_verdict_html(composite)))
+
+
+def display_domain_summary(domain_results):
+    display(HTML(_domain_summary_html(domain_results)))
+
+
+def display_domain_detail(domain_results):
+    display(HTML(_domain_detail_html(domain_results)))
 
 
 def display_full_report(filename, results):
     """Render the complete evaluation report."""
-    display_header(filename)
-    display_verdict(results["composite"])
-    display_domain_summary(results["domains"])
-    display(HTML("<hr><h3>Detailed Domain Evaluation</h3>"))
-    display_domain_detail(results["domains"])
+    display(HTML(_full_report_html(filename, results)))
 
+
+# ---------------------------------------------------------------------------
+# PDF generation and download
+# ---------------------------------------------------------------------------
+
+_PDF_CSS = """
+body { font-family: Arial, sans-serif; font-size: 13px; color: #222; margin: 24px; }
+table { border-collapse: collapse; width: 100%; margin-bottom: 12px; }
+th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; }
+th { background: #f5f5f5; }
+h1, h2, h3, h4 { margin: 8px 0; }
+div[style*="border-radius"] { -weasyprint-content: none; }
+"""
+
+
+def _generate_pdf(html_body):
+    """Convert an HTML body string to PDF bytes using weasyprint."""
+    from weasyprint import HTML as WP_HTML, CSS
+    full_html = (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'></head>"
+        f"<body>{html_body}</body></html>"
+    )
+    return WP_HTML(string=full_html).write_pdf(stylesheets=[CSS(string=_PDF_CSS)])
+
+
+def _display_pdf_download_button(filename, results, report_type="scientific"):
+    """Generate a PDF from results and render a download link below the report."""
+    try:
+        if report_type == "artifact":
+            html_body = _full_artifact_report_html(filename, results)
+        else:
+            html_body = _full_report_html(filename, results)
+
+        pdf_bytes = _generate_pdf(html_body)
+        b64 = base64.b64encode(pdf_bytes).decode()
+        stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+        pdf_name = f"{stem}_eval_report.pdf"
+
+        display(HTML(
+            f'<a href="data:application/pdf;base64,{b64}" download="{pdf_name}" '
+            f'style="display:inline-block;padding:8px 18px;background:#1a237e;color:white;'
+            f'border-radius:4px;text-decoration:none;font-size:13px;margin:8px 0">'
+            f'&#8595; Download PDF &mdash; {pdf_name}</a>'
+        ))
+    except ImportError:
+        display(HTML(
+            '<p style="color:#e65100"><strong>weasyprint</strong> is not installed. '
+            'Run <code>pip install weasyprint</code> to enable PDF downloads.</p>'
+        ))
+
+
+# ---------------------------------------------------------------------------
+# DataFrame conversion
+# ---------------------------------------------------------------------------
 
 def results_to_dataframe(results):
     """Convert a single document's results to a flat DataFrame."""
@@ -156,6 +239,7 @@ def display_all_reports(all_results):
     """Render evaluation reports for every document in all_results."""
     for filename, data in all_results.items():
         display_full_report(filename, data["results"])
+        _display_pdf_download_button(filename, data["results"], report_type="scientific")
         display(HTML("<br><hr style='border:2px solid #ccc'><br>"))
 
 
@@ -204,24 +288,25 @@ def display_comparison(all_results):
 # AI Artifact Evaluation — display and export functions
 # ===========================================================================
 
-def _artifact_header(filename):
-    display(HTML(f"""
+def _artifact_header_html(filename):
+    return f"""
     <div style="background:linear-gradient(135deg,#b71c1c,#c62828);color:white;padding:24px 32px;border-radius:8px;margin-bottom:16px">
         <h1 style="margin:0;font-size:24px">AI Artifact Evaluation</h1>
         <p style="margin:4px 0 0;opacity:0.85">Artifact Review &mdash; {filename}</p>
         <p style="margin:2px 0 0;opacity:0.65;font-size:12px">Generated {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
     </div>
-    """))
+    """
 
 
-def _artifact_domain_detail(domain_results):
+def _artifact_domain_detail_html(domain_results):
+    parts = []
     for domain, data in domain_results.items():
         color = _score_color(data["score"])
-        display(HTML(f"""
+        parts.append(f"""
         <div style="border-left:4px solid {color};padding:8px 16px;margin:12px 0">
             <h4 style="margin:0">{domain} — {_bar_html(data['score'], 180)}</h4>
         </div>
-        """))
+        """)
         rows = []
         for c in data["criteria"]:
             rows.append({
@@ -233,16 +318,24 @@ def _artifact_domain_detail(domain_results):
             })
         s = pd.DataFrame(rows).style
         s = _style_map(s, lambda v: f"color: {_score_color(v)}" if isinstance(v, (int, float)) and v <= 100 else "", subset=["Score"])
-        display(HTML(s.hide(axis="index").to_html()))
+        parts.append(s.hide(axis="index").to_html())
+    return "".join(parts)
+
+
+def _full_artifact_report_html(filename, results):
+    """Build complete HTML string for one artifact evaluation report."""
+    return "".join([
+        _artifact_header_html(filename),
+        _verdict_html(results["composite"]),
+        _domain_summary_html(results["domains"]),
+        "<hr><h3>Detailed Artifact Evaluation</h3>",
+        _artifact_domain_detail_html(results["domains"]),
+    ])
 
 
 def display_artifact_report(filename, results):
     """Render a single artifact evaluation report."""
-    _artifact_header(filename)
-    display_verdict(results["composite"])
-    display_domain_summary(results["domains"])
-    display(HTML("<hr><h3>Detailed Artifact Evaluation</h3>"))
-    _artifact_domain_detail(results["domains"])
+    display(HTML(_full_artifact_report_html(filename, results)))
 
 
 def artifact_results_to_dataframe(results):
@@ -272,6 +365,7 @@ def display_all_artifact_reports(all_results):
     """Render artifact evaluation reports for every artifact."""
     for filename, data in all_results.items():
         display_artifact_report(filename, data["results"])
+        _display_pdf_download_button(filename, data["results"], report_type="artifact")
         display(HTML("<br><hr style='border:2px solid #ccc'><br>"))
 
 
