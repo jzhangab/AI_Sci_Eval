@@ -2,8 +2,8 @@
 Report generation utilities.
 Produces styled HTML and DataFrame outputs for Dataiku notebook display.
 """
-import base64
 import datetime
+import io
 import pandas as pd
 from IPython.display import HTML, display
 
@@ -157,7 +157,7 @@ def display_full_report(filename, results):
 
 
 # ---------------------------------------------------------------------------
-# PDF generation and download
+# PDF generation and Dataiku folder export
 # ---------------------------------------------------------------------------
 
 _PDF_CSS = """
@@ -166,22 +166,27 @@ table { border-collapse: collapse; width: 100%; margin-bottom: 12px; }
 th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; }
 th { background: #f5f5f5; }
 h1, h2, h3, h4 { margin: 8px 0; }
-div[style*="border-radius"] { -weasyprint-content: none; }
 """
+
+_DATAIKU_FOLDER = "evaluation_results"
 
 
 def _generate_pdf(html_body):
-    """Convert an HTML body string to PDF bytes using weasyprint."""
-    from weasyprint import HTML as WP_HTML, CSS
+    """Convert an HTML body string to PDF bytes using xhtml2pdf."""
+    from xhtml2pdf import pisa
     full_html = (
-        "<!DOCTYPE html><html><head><meta charset='utf-8'></head>"
+        f"<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        f"<style>{_PDF_CSS}</style></head>"
         f"<body>{html_body}</body></html>"
     )
-    return WP_HTML(string=full_html).write_pdf(stylesheets=[CSS(string=_PDF_CSS)])
+    buf = io.BytesIO()
+    pisa.CreatePDF(full_html, dest=buf, encoding="utf-8")
+    return buf.getvalue()
 
 
-def _display_pdf_download_button(filename, results, report_type="scientific"):
-    """Generate a PDF from results and render a download link below the report."""
+def _save_pdf_to_folder(filename, results, report_type="scientific"):
+    """Generate a PDF from results and save it to the Dataiku evaluation_results folder."""
+    import dataiku
     try:
         if report_type == "artifact":
             html_body = _full_artifact_report_html(filename, results)
@@ -189,20 +194,19 @@ def _display_pdf_download_button(filename, results, report_type="scientific"):
             html_body = _full_report_html(filename, results)
 
         pdf_bytes = _generate_pdf(html_body)
-        b64 = base64.b64encode(pdf_bytes).decode()
         stem = filename.rsplit(".", 1)[0] if "." in filename else filename
         pdf_name = f"{stem}_eval_report.pdf"
 
+        folder = dataiku.Folder(_DATAIKU_FOLDER)
+        folder.upload_data(pdf_name, pdf_bytes)
+
         display(HTML(
-            f'<a href="data:application/pdf;base64,{b64}" download="{pdf_name}" '
-            f'style="display:inline-block;padding:8px 18px;background:#1a237e;color:white;'
-            f'border-radius:4px;text-decoration:none;font-size:13px;margin:8px 0">'
-            f'&#8595; Download PDF &mdash; {pdf_name}</a>'
+            f'<p style="color:#2e7d32;margin:4px 0">&#10003; PDF saved to '
+            f'<strong>{_DATAIKU_FOLDER}/{pdf_name}</strong></p>'
         ))
-    except ImportError:
+    except Exception as e:
         display(HTML(
-            '<p style="color:#e65100"><strong>weasyprint</strong> is not installed. '
-            'Run <code>pip install weasyprint</code> to enable PDF downloads.</p>'
+            f'<p style="color:#c62828">&#10007; PDF export failed for <strong>{filename}</strong>: {e}</p>'
         ))
 
 
@@ -239,7 +243,7 @@ def display_all_reports(all_results):
     """Render evaluation reports for every document in all_results."""
     for filename, data in all_results.items():
         display_full_report(filename, data["results"])
-        _display_pdf_download_button(filename, data["results"], report_type="scientific")
+        _save_pdf_to_folder(filename, data["results"], report_type="scientific")
         display(HTML("<br><hr style='border:2px solid #ccc'><br>"))
 
 
@@ -365,7 +369,7 @@ def display_all_artifact_reports(all_results):
     """Render artifact evaluation reports for every artifact."""
     for filename, data in all_results.items():
         display_artifact_report(filename, data["results"])
-        _display_pdf_download_button(filename, data["results"], report_type="artifact")
+        _save_pdf_to_folder(filename, data["results"], report_type="artifact")
         display(HTML("<br><hr style='border:2px solid #ccc'><br>"))
 
 
