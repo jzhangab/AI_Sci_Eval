@@ -217,6 +217,61 @@ def run_full_evaluation(text):
     }
 
 
+def evaluate_documents_deep_research(documents):
+    """
+    Deep research mode: synthesize all documents in the folder into a unified
+    project intelligence text, then evaluate the project as a single entity.
+
+    Returns {project_key: {"text": str, "results": dict, "source_files": list}}.
+    """
+    from IPython.display import display, HTML
+    from lib.deep_research import synthesize_project
+
+    if not documents:
+        display(HTML(
+            '<div style="background:#fff3e0;border:1px solid #e65100;border-radius:6px;'
+            'padding:16px;color:#e65100"><strong>No documents loaded.</strong> '
+            'Add files to the eval_documents folder or use the upload widget, '
+            'then re-run this cell.</div>'
+        ))
+        return {}
+
+    filenames = list(documents.keys())
+    n = len(filenames)
+    print(f"Deep Research mode: synthesizing {n} document(s) as a single project...")
+    for fn in filenames:
+        print(f"  - {fn}")
+
+    try:
+        print("\nStep 1/2: Synthesizing project intelligence across all documents...")
+        synthesized_text, _ = synthesize_project(documents)
+        print(f"  -> Synthesis complete ({len(synthesized_text.split()):,} words)")
+
+        print("Step 2/2: Evaluating synthesized project "
+              "(5 domains: Accuracy, Safety, Transparency, Repeatability, Trustworthiness)...")
+        results = run_full_evaluation(synthesized_text)
+
+        label = ", ".join(filenames[:3]) + ("..." if n > 3 else "")
+        project_key = f"[Project — {n} file(s): {label}]"
+
+        print(f"\n  -> Composite: {results['composite']['composite_score']} "
+              f"— {results['composite']['verdict']}")
+        print(f"\nDeep research evaluation complete. {n} document(s) evaluated as 1 project.")
+
+        return {
+            project_key: {
+                "text": synthesized_text,
+                "results": results,
+                "source_files": filenames,
+                "mode": "deep_research",
+            }
+        }
+
+    except Exception as exc:
+        print(f"ERROR in deep research evaluation: {exc}")
+        return {}
+
+
 def evaluate_documents(documents):
     """
     Parse and evaluate all documents in a {filename: bytes} dict.
